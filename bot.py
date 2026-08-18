@@ -24,7 +24,16 @@ HEADERS = {"x-apisports-key": API_KEY}
 def api_get(endpoint, params=None):
     resp = requests.get(f"{API_BASE}/{endpoint}", headers=HEADERS, params=params, timeout=15)
     resp.raise_for_status()
-    return resp.json()
+    data = resp.json()
+
+    errors = data.get("errors")
+    if errors:
+        logger.warning(f"API-Football errors sou '{endpoint}' (params={params}): {errors}")
+
+    results_count = data.get("results", len(data.get("response", [])))
+    logger.info(f"API-Football '{endpoint}' params={params} -> {results_count} rezilta")
+
+    return data
 
 
 def search_team(name):
@@ -136,6 +145,14 @@ def build_prediction(team1, team2):
     over_under = "Plis pase 2.5 gòl (Over 2.5)" if avg_total_goals > 2.5 else "Mwens pase 2.5 gòl (Under 2.5)"
     btts = "Wi — toude ekip gen chans fè gòl (BTTS)" if (gf1 > 0.8 and gf2 > 0.8) else "Non garanti (BTTS pa fyab)"
 
+    no_data_warning = ""
+    if len(fixtures1) == 0 and len(fixtures2) == 0 and total_h2h == 0:
+        no_data_warning = (
+            "\n⚠️ *Atansyon:* API-Football pa retounen okenn done pou 2 ekip sa yo. "
+            "Sa ka vle di plan gratis la limite (kota rekèt/jou fin, oswa sezon aktyèl "
+            "la pa disponib nan plan gratis la). Verifye sou dashboard.api-football.com.\n"
+        )
+
     text = (
         f"⚽ *{name1}* vs *{name2}*\n\n"
         f"📊 Fòm {name1} (5 dènye): {form1*100:.0f}% | {gf1:.1f} mache / {ga1:.1f} bay\n"
@@ -144,73 +161,6 @@ def build_prediction(team1, team2):
         f"🎯 *Pwonostik Doub Chans:* {dc}\n"
         f"   Nivo konfyans: {confidence}\n"
         f"⚡ *Ekstra:* {over_under}\n"
-        f"⚡ *BTTS:* {btts}\n\n"
-        f"⚠️ Sa se yon estimasyon estatistik ki baze sou fòm ak istwa — se pa yon garanti 100%."
-    )
-    return text
-
-
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await update.message.reply_text(
-        "👋 Byenveni nan bot pwonostik la!\n\n"
-        "Voye non de ekip yo konsa:\n"
-        "`Ekip1 vs Ekip2`\n\n"
-        "Egzanp: `Real Madrid vs Barcelona`",
-        parse_mode="Markdown",
-    )
-
-
-async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    text = update.message.text.strip()
-    parts = re.split(r"\s+vs\s+|\s+contre\s+|\s+-\s+", text, flags=re.IGNORECASE)
-
-    if len(parts) != 2:
-        await update.message.reply_text(
-            "Tanpri ekri konsa: `Ekip1 vs Ekip2`\nEgzanp: `PSG vs Marseille`",
-            parse_mode="Markdown",
-        )
-        return
-
-    name1, name2 = parts[0].strip(), parts[1].strip()
-    await update.message.reply_text(f"🔎 M ap analize {name1} vs {name2}...")
-
-    try:
-        team1 = search_team(name1)
-        team2 = search_team(name2)
-
-        if not team1:
-            await update.message.reply_text(f"❌ Mwen pa jwenn ekip \"{name1}\". Verifye ortograf la.")
-            return
-        if not team2:
-            await update.message.reply_text(f"❌ Mwen pa jwenn ekip \"{name2}\". Verifye ortograf la.")
-            return
-
-        result = build_prediction(team1, team2)
-        await update.message.reply_text(result, parse_mode="Markdown")
-
-    except requests.exceptions.HTTPError:
-        logger.exception("Erè API")
-        await update.message.reply_text(
-            "⚠️ Erè ak API-Football la (verifye kle API a oswa limit kota a)."
-        )
-    except Exception as e:
-        logger.exception("Erè jenerik")
-        await update.message.reply_text(f"⚠️ Yon erè rive: {e}")
-
-
-def main():
-    if not TELEGRAM_TOKEN:
-        raise RuntimeError("Manke TELEGRAM_BOT_TOKEN nan environment (.env)")
-    if not API_KEY:
-        raise RuntimeError("Manke API_FOOTBALL_KEY nan environment (.env)")
-
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
-
-    logger.info("Bot ap kòmanse (polling)...")
-    app.run_polling()
-
-
-if __name__ == "__main__":
-    main()
+        f"⚡ *BTTS:* {btts}\n"
+        f"{no_data_warning}\n"
+        f"⚠️ Sa s
