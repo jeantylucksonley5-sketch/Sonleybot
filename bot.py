@@ -163,4 +163,105 @@ def build_prediction(team1, team2):
         f"⚡ *Ekstra:* {over_under}\n"
         f"⚡ *BTTS:* {btts}\n"
         f"{no_data_warning}\n"
-        f"⚠️ Sa s
+        f"⚠️ Sa se yon estimasyon estatistik ki baze sou fòm ak istwa — se pa yon garanti 100%."
+    )
+    return text
+
+
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    await update.message.reply_text(
+        "👋 Byenveni nan bot pwonostik la!\n\n"
+        "Voye non de ekip yo konsa:\n"
+        "`Ekip1 vs Ekip2`\n\n"
+        "Egzanp: `Real Madrid vs Barcelona`\n\n"
+        "🔢 Ou ka voye jiska 5 match nan menm mesaj la — yon match pa liy:\n"
+        "`Real Madrid vs Barcelona`\n"
+        "`PSG vs Marseille`\n"
+        "`Liverpool vs Arsenal`",
+        parse_mode="Markdown",
+    )
+
+
+MAX_MATCHES = 5
+
+
+async def process_one_match(update: Update, name1: str, name2: str):
+    try:
+        team1 = search_team(name1)
+        team2 = search_team(name2)
+
+        if not team1:
+            await update.message.reply_text(f"❌ Mwen pa jwenn ekip \"{name1}\". Verifye ortograf la.")
+            return
+        if not team2:
+            await update.message.reply_text(f"❌ Mwen pa jwenn ekip \"{name2}\". Verifye ortograf la.")
+            return
+
+        result = build_prediction(team1, team2)
+        await update.message.reply_text(result, parse_mode="Markdown")
+
+    except requests.exceptions.HTTPError:
+        logger.exception("Erè API")
+        await update.message.reply_text(
+            f"⚠️ Erè ak API-Football la pou {name1} vs {name2} (verifye kle API a oswa limit kota a)."
+        )
+    except Exception as e:
+        logger.exception("Erè jenerik")
+        await update.message.reply_text(f"⚠️ Yon erè rive pou {name1} vs {name2}: {e}")
+
+
+async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    text = update.message.text.strip()
+    lines = [line.strip() for line in text.split("\n") if line.strip()]
+
+    if not lines:
+        return
+
+    if len(lines) > MAX_MATCHES:
+        await update.message.reply_text(
+            f"⚠️ Ou voye {len(lines)} match — maksimòm se {MAX_MATCHES} match nan yon sèl mesaj. "
+            f"M ap analize sèlman {MAX_MATCHES} premye yo."
+        )
+        lines = lines[:MAX_MATCHES]
+
+    valid_matches = []
+    for line in lines:
+        parts = re.split(r"\s+vs\s+|\s+contre\s+|\s+-\s+", line, flags=re.IGNORECASE)
+        if len(parts) != 2:
+            await update.message.reply_text(
+                f"⚠️ Fòma pa bon pou: \"{line}\"\nEkri konsa: `Ekip1 vs Ekip2`",
+                parse_mode="Markdown",
+            )
+            continue
+        valid_matches.append((parts[0].strip(), parts[1].strip()))
+
+    if not valid_matches:
+        return
+
+    if len(valid_matches) > 1:
+        noms = ", ".join(f"{n1} vs {n2}" for n1, n2 in valid_matches)
+        await update.message.reply_text(f"🔎 M ap analize {len(valid_matches)} match: {noms}...")
+    else:
+        n1, n2 = valid_matches[0]
+        await update.message.reply_text(f"🔎 M ap analize {n1} vs {n2}...")
+
+    for name1, name2 in valid_matches:
+        await process_one_match(update, name1, name2)
+
+
+def main():
+    if not TELEGRAM_TOKEN:
+        raise RuntimeError("Manke TELEGRAM_BOT_TOKEN nan environment (.env)")
+    if not API_KEY:
+        raise RuntimeError("Manke API_FOOTBALL_KEY nan environment (.env)")
+
+    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
+
+    logger.info("Bot ap kòmanse (polling)...")
+    app.run_polling()
+
+
+if __name__ == "__main__":
+    main()
